@@ -215,6 +215,12 @@
         .btn-delete {
             background: var(--accent);
         }
+		.btn-merge {
+			background: #9b59b6; /* Color púrpura, puedes cambiarlo */
+		}
+		.btn-merge:hover {
+			background: #8e44ad; /* Color púrpura más oscuro al pasar el ratón */
+		}
         .btn-delete:hover {
             background: #c0392b;
         }
@@ -591,13 +597,16 @@
                     </div>
                 </form>
                 <div class="import-export-section">
-                    <h3>Importar/Exportar Base de Datos</h3>
-                    <div class="btn-group">
-                        <button type="button" id="exportDatabase" class="btn btn-success">Exportar Base de Datos</button>
-                        <button type="button" id="importDatabase" class="btn btn-primary">Importar Base de Datos</button>
-                        <input type="file" id="importFile" accept=".json" style="display: none;">
-                    </div>
-                </div>
+					<h3>Importar/Exportar Base de Datos</h3>
+					<div class="btn-group">
+						<button type="button" id="mergeDatabase" class="btn btn-merge">Fusionar Base de Datos</button>
+						<button type="button" id="exportDatabase" class="btn btn-success">Exportar Base de Datos</button>
+						<button type="button" id="importDatabase" class="btn btn-primary">Importar Base de Datos</button>
+						<!-- Inputs de archivo ocultos -->
+						<input type="file" id="importFile" accept=".json" style="display: none;">
+						<input type="file" id="mergeFile" accept=".json" multiple style="display: none;">
+					</div>
+				</div>
             </section>
             <section class="preview-section">
                 <h2>Vista Previa</h2>
@@ -664,6 +673,8 @@
         const editIndexInput = document.getElementById('editIndex');
         const exportDatabaseBtn = document.getElementById('exportDatabase');
         const importDatabaseBtn = document.getElementById('importDatabase');
+		const mergeDatabaseBtn = document.getElementById('mergeDatabase');
+		const mergeFileInput = document.getElementById('mergeFile');
         const importFileInput = document.getElementById('importFile');
         const openCameraBtn = document.getElementById('openCamera');
         const cameraContainer = document.getElementById('cameraContainer');
@@ -1128,25 +1139,45 @@
         });
         
         // Export database
-        exportDatabaseBtn.addEventListener('click', function() {
-            if (actors.length === 0) {
-                alert('No hay datos para exportar.');
-                return;
-            }
-            const dataStr = JSON.stringify({
-                actors: actors,
-                databaseInfo: {
-                    year: databaseYear,
-                    semester: databaseSemester
-                }
-            }, null, 2);
-            const dataUri = 'application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-            const exportFileDefaultName = 'base_datos_actores.json';
-            const linkElement = document.createElement('a');
-            linkElement.setAttribute('href', dataUri);
-            linkElement.setAttribute('download', exportFileDefaultName);
-            linkElement.click();
-        });
+		exportDatabaseBtn.addEventListener('click', function() {
+			if (actors.length === 0) {
+				alert('No hay datos para exportar.');
+				return;
+			}
+			
+			// Prepare data for export
+			const exportData = {
+				actors: actors,
+				databaseInfo: {
+					year: databaseYear,
+					semester: databaseSemester
+				}
+			};
+			
+			// Convert to JSON string
+			const dataStr = JSON.stringify(exportData, null, 2);
+			
+			// Create blob instead of data URI
+			const blob = new Blob([dataStr], { type: 'application/json' });
+			
+			// Create object URL
+			const url = URL.createObjectURL(blob);
+			
+			// Create temporary link element
+			const linkElement = document.createElement('a');
+			linkElement.setAttribute('href', url);
+			linkElement.setAttribute('download', 'base_datos_actores.json');
+			
+			// Append to document, trigger click, then remove
+			document.body.appendChild(linkElement);
+			linkElement.click();
+			document.body.removeChild(linkElement);
+			
+			// Revoke the object URL to free memory
+			setTimeout(() => {
+				URL.revokeObjectURL(url);
+			}, 100);
+		});
         
         // Import database
         importDatabaseBtn.addEventListener('click', function() {
@@ -1184,6 +1215,87 @@
             };
             reader.readAsText(file);
         });
+		
+		// Merge databases
+		mergeDatabaseBtn.addEventListener('click', function() {
+			mergeFileInput.click(); // Abre el diálogo de selección de archivos
+		});
+
+		mergeFileInput.addEventListener('change', function(e) {
+			const files = e.target.files;
+			if (!files || files.length === 0) {
+				alert('No se seleccionaron archivos.');
+				return;
+			}
+
+			let mergedActors = [...actors]; // Comenzamos con los actores actuales
+			let filesProcessed = 0;
+			let totalFiles = files.length;
+			let newActorsCount = 0; // Contador para nuevos actores añadidos
+
+			// Procesamos cada archivo seleccionado
+			Array.from(files).forEach(file => {
+				const reader = new FileReader();
+				reader.onload = function(e) {
+					try {
+						const data = JSON.parse(e.target.result);
+
+						if (data.actors && Array.isArray(data.actors)) {
+							// Fusionamos los actores de este archivo
+							const initialCount = mergedActors.length;
+							mergedActors = mergedActors.concat(data.actors);
+							newActorsCount += (mergedActors.length - initialCount);
+
+							// Actualizamos la información si es relevante
+							// (Opcional: podrías decidir cómo manejar año/semestre de múltiples archivos)
+							// if (data.databaseInfo) { ... }
+
+							filesProcessed++;
+							if (filesProcessed === totalFiles) {
+								// Todos los archivos han sido procesados
+								actors = mergedActors; // Actualizamos la base de datos principal
+								
+								// === NUEVO: Ordenar por edad ===
+								sortActorsByAge(); 
+								// =============================
+								
+								saveDatabase(); // Guardamos en localStorage
+								updateActorList(); // Actualizamos la lista mostrada
+								updateActorCount(); // Actualizamos el contador
+								// updateDatabaseInfo(); // Opcional, si necesitas actualizar info de BD
+
+								alert(`Fusión completada.\nSe añadieron ${newActorsCount} nuevos actores.`);
+							}
+						} else {
+							filesProcessed++;
+							alert(`El archivo "${file.name}" no contiene una base de datos válida.`);
+							// Verificamos si es el último archivo para mostrar el resumen final
+							if (filesProcessed === totalFiles && newActorsCount > 0) {
+								 actors = mergedActors;
+								 saveDatabase();
+								 updateActorList();
+								 updateActorCount();
+								 alert(`Fusión completada.\nSe añadieron ${newActorsCount} nuevos actores.`);
+							}
+						}
+					
+					} catch (error) {
+						filesProcessed++;
+						alert(`Error al procesar el archivo "${file.name}": ${error.message}`);
+						 // Verificamos si es el último archivo para mostrar el resumen final
+						if (filesProcessed === totalFiles && newActorsCount > 0) {
+							 actors = mergedActors;
+							 sortActorsByAge(); // === NUEVO ===
+							 saveDatabase();
+							 updateActorList();
+							 updateActorCount();
+							 alert(`Fusión completada.\nSe añadieron ${newActorsCount} nuevos actores.`);
+						}
+					}
+				};
+				reader.readAsText(file);
+			});
+		});
         
         // Set database info
         setDatabaseInfoBtn.addEventListener('click', function() {
